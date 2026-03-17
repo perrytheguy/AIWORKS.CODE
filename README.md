@@ -143,7 +143,7 @@ AIWORKS> 포털 열어줘
 |------|------|--------------|
 | `answer` | 텍스트 응답 | `message` |
 | `office` | Excel/Word/PPT 제어 | `app`, `action`, `path` |
-| `hwp` | 한글 HWP 제어 | `action`, `path`, `contents`(new 전용) |
+| `hwp` | 한글 HWP 제어 | `action`, `path`, `contents`(new 전용), `contentsPath`(new 전용) |
 | `ie` | IE 브라우저 제어 | `action`, `url`, `selector` |
 | `chrome` | Chrome 브라우저 | `action`, `url` |
 | `pdf` | PDF 텍스트 추출 | `path` |
@@ -158,6 +158,16 @@ AIWORKS> 포털 열어줘
 /run hwp action=new contents="[font=휴먼명조체,size=18]보고서 제목
 [font=바탕체,size=12]본문 첫째 줄입니다.
 태그 없는 줄은 기본 폰트/사이즈로 입력됩니다."
+```
+
+내용이 길 경우 임시 파일에 저장 후 `contentsPath`로 전달합니다. `contentsPath`는 `contents`보다 우선 적용됩니다:
+
+```powershell
+# 임시 파일 생성
+$tmp = [IO.Path]::GetTempFileName() -replace '\.tmp$', '.txt'
+Set-Content $tmp -Value "[font=휴먼명조체,size=18]제목`n[font=바탕체,size=12]긴 본문..." -Encoding UTF8
+
+/run hwp action=new contentsPath="$tmp"
 ```
 
 ```

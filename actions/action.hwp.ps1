@@ -94,9 +94,26 @@ function global:Write-HwpContents {
 function global:Invoke-Action-hwp {
     param([object]$Params)
 
-    $action   = if ($Params.action)   { $Params.action }   else { "open" }
-    $path     = if ($Params.path)     { $Params.path }     else { "" }
-    $contents = if ($Params.contents) { $Params.contents } else { "" }
+    $action       = if ($Params.action)       { $Params.action }       else { "open" }
+    $path         = if ($Params.path)         { $Params.path }         else { "" }
+    $contents     = if ($Params.contents)     { $Params.contents }     else { "" }
+    $contentsPath = if ($Params.contentsPath) { $Params.contentsPath } else { "" }
+
+    # contentsPath가 지정된 경우 파일에서 contents 읽기 (contents보다 우선)
+    if ($contentsPath -ne "") {
+        if (-not (Test-Path $contentsPath)) {
+            Write-AgentLog "hwp: contentsPath not found: $contentsPath" -Type Error
+            return "Error: contentsPath not found: $contentsPath"
+        }
+        try {
+            $contents = [System.IO.File]::ReadAllText($contentsPath, [System.Text.Encoding]::UTF8)
+            Write-AgentLog "hwp: contents loaded from file: $contentsPath ($($contents.Length) chars)" -Type System
+        }
+        catch {
+            Write-AgentLog "hwp: failed to read contentsPath: $($_.Exception.Message)" -Type Error
+            return "Error: failed to read contentsPath: $($_.Exception.Message)"
+        }
+    }
 
     Write-AgentLog "HWP control: $action => $path" -Type Action
 

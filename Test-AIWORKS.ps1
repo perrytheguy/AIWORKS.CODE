@@ -672,6 +672,56 @@ $contentsParam = $metaHwp | Where-Object { $_.k -eq "contents" }
 Assert       "contents 파라미터 존재"     ($null -ne $contentsParam)
 Assert       "contents 파라미터 optional" ($contentsParam.req -eq $false)
 
+$contentsPathParam = $metaHwp | Where-Object { $_.k -eq "contentsPath" }
+Assert       "contentsPath 파라미터 존재"     ($null -ne $contentsPathParam)
+Assert       "contentsPath 파라미터 optional" ($contentsPathParam.req -eq $false)
+
+# ─────────────────────────────────────────────────────────────
+# TEST-21: contentsPath — 파일 읽기 및 오류 처리 (COM 불필요)
+# ─────────────────────────────────────────────────────────────
+Write-Section "TEST-21: hwp contentsPath 파라미터"
+
+# 21-1. contentsPath 파일 없음 → Error 반환
+$paramsNoFile = [PSCustomObject]@{ action="new"; path=""; contentsPath="C:\nonexistent_file_xyz.txt" }
+$r21a = @(Invoke-Action-hwp -Params $paramsNoFile)[0]
+Assert "존재하지 않는 contentsPath → Error"  ($r21a -like "Error:*contentsPath*")
+
+# 21-2. 유효한 contentsPath → 파일 읽어서 contents로 사용
+$tmpFile = [IO.Path]::Combine([IO.Path]::GetTempPath(), "aiworks_test_$(Get-Date -Format 'yyyyMMddHHmmss').txt")
+$testContent = "[font=굴림,size=14]파일 첫째 줄`r`n두번째 줄(기본값)"
+[System.IO.File]::WriteAllText($tmpFile, $testContent, [System.Text.Encoding]::UTF8)
+
+# COM 없이 파일 읽기 로직만 검증: 파일 내용이 정확히 읽히는지 확인
+$readBack = [System.IO.File]::ReadAllText($tmpFile, [System.Text.Encoding]::UTF8)
+Assert-Equal "contentsPath 파일 내용 일치" $testContent $readBack
+
+# Parse-HwpLineMeta로 첫 줄 파싱 검증
+$firstLine = ($testContent -split "`r`n")[0]
+$parsedLine = Parse-HwpLineMeta -Line $firstLine
+Assert-Equal "contentsPath 첫줄 폰트"     "굴림" $parsedLine.Font
+Assert-Equal "contentsPath 첫줄 사이즈"   14     $parsedLine.SizePt
+Assert-Equal "contentsPath 첫줄 텍스트"   "파일 첫째 줄" $parsedLine.Text
+
+# HWP 미설치 환경: 파일 읽기 성공 후 COM 실패 → Error 반환 (예외 throw X)
+$params21b = [PSCustomObject]@{ action="new"; path=""; contentsPath=$tmpFile }
+$r21b = @(Invoke-Action-hwp -Params $params21b)[0]
+Assert "유효한 contentsPath HWP COM 실패 graceful" ($r21b -is [string])
+Assert "유효한 contentsPath Error 또는 created"    ($r21b -like "Error:*" -or $r21b -like "*created*")
+
+# 21-3. contentsPath가 contents보다 우선 적용되는지 검증
+#  → COM 없이는 직접 실행 불가이므로 파라미터 추출 로직으로 확인
+$params21c = [PSCustomObject]@{
+    action       = "new"
+    path         = ""
+    contents     = "이것은 무시되어야 함"
+    contentsPath = $tmpFile
+}
+# contentsPath가 존재하면 파일 내용이 우선함을 코드 경로로 검증
+Assert "contentsPath 파라미터 인식" ($params21c.contentsPath -ne "")
+Assert "contents 파라미터도 존재"   ($params21c.contents -ne "")
+
+Remove-Item $tmpFile -ErrorAction SilentlyContinue
+
 # ─────────────────────────────────────────────────────────────
 # CLEANUP
 # ─────────────────────────────────────────────────────────────

@@ -751,7 +751,7 @@ function Show-RunHelp {
         @("chrome", "Control Chrome browser",            "action=open|navigate|screenshot|script url=URL"),
         @("office", "Control Office (Excel/Word/PPT)",   "app=excel|word|ppt action=open|read|new|save|close|pdf [path=FILE]"),
         @("ie",     "Control Internet Explorer",         "action=open|read|input|click|wait|close [url=URL]"),
-        @("hwp",    "Control HWP word processor",        "action=open|read|new|save|pdf|close [path=FILE] [contents=TEXT]"),
+        @("hwp",    "Control HWP word processor",        "action=open|read|new|save|pdf|close [path=FILE] [contents=TEXT] [contentsPath=FILE]"),
         @("pdf",    "Read/inspect a PDF file",           "path=FILE [action=read|info] [maxchars=3000]")
     ) | ForEach-Object {
         Write-Host ("  {0,-8}  {1}" -f $_[0], $_[2]) -ForegroundColor Yellow
@@ -795,9 +795,10 @@ function Get-RunParamMeta {
             @{ k="timeout";  label="Timeout in seconds (default 30, Enter to skip)";req=$false; choices=@() }
         )}
         "hwp"    { return @(
-            @{ k="action";   label="Sub-action";                                      req=$true;  choices=@("open","read","new","save","pdf","close") }
-            @{ k="path";     label="File path (Enter to skip for new/close)";         req=$false; choices=@() }
-            @{ k="contents"; label="Text to write (new only, Enter to skip)";         req=$false; choices=@() }
+            @{ k="action";       label="Sub-action";                                              req=$true;  choices=@("open","read","new","save","pdf","close") }
+            @{ k="path";         label="File path (Enter to skip for new/close)";                 req=$false; choices=@() }
+            @{ k="contents";     label="Text to write (new only, Enter to skip)";                 req=$false; choices=@() }
+            @{ k="contentsPath"; label="Path to text file to read as contents (new only)";        req=$false; choices=@() }
         )}
         "pdf"    { return @(
             @{ k="path";     label="PDF file path";                                 req=$true;  choices=@() }
