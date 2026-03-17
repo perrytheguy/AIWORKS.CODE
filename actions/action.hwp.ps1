@@ -1,17 +1,102 @@
-﻿# ============================================================
+# ============================================================
 #  AIWORKS.CODE - Action Module: hwp
 #  Controls Hangul HWP word processor via COM.
 #
 #  Expected $Params fields:
-#    action : "open" | "read" | "close" | "new" | "save" | "pdf"
-#    path   : file path (string)
+#    action   : "open" | "read" | "close" | "new" | "save" | "pdf"
+#    path     : file path (string)
+#    contents : text to write on new (optional, new action only)
+#               Each line may begin with a meta tag to set font/size:
+#                 [font=FaceName,size=N]line text
+#               Default: font=휴먼명조체, size=16 (pt)
 # ============================================================
+
+# HWP 기본 폰트 상수 (Unicode 코드포인트로 정의 — 인코딩 독립적)
+# 휴(D734) 먼(BA39) 명(BA85) 조(C870) 체(CCB4)
+$script:HwpDefaultFont = [char[]](0xD734,0xBA3C,0xBA85,0xC870,0xCCB4) -join ''
+
+# ---------------------------------------------------------
+#  Helper: parse per-line font/size meta tag
+#    Input  : raw line string
+#    Output : PSCustomObject { Font, SizeHwp(1/100pt), SizePt, Text }
+# ---------------------------------------------------------
+function global:Parse-HwpLineMeta {
+    param(
+        [string]$Line,
+        [string]$DefaultFont   = $null,
+        [int]   $DefaultSizePt = 0
+    )
+
+    if ([string]::IsNullOrEmpty($DefaultFont)) { $DefaultFont   = $script:HwpDefaultFont }
+    if ($DefaultSizePt -eq 0)                  { $DefaultSizePt = 16 }
+
+    $font   = $DefaultFont
+    $sizePt = $DefaultSizePt
+    $text   = $Line
+
+    # Tag format: [font=FaceName,size=N]  (spaces around = allowed)
+    if ($Line -match '^\[font\s*=\s*([^\],]+),\s*size\s*=\s*(\d+)\](.*)$') {
+        $font   = $matches[1].Trim()
+        $sizePt = [int]$matches[2]
+        $text   = $matches[3]
+    }
+
+    return [PSCustomObject]@{
+        Font    = $font
+        SizeHwp = $sizePt * 100   # HWP unit: 1/100 pt
+        SizePt  = $sizePt
+        Text    = $text
+    }
+}
+
+# ---------------------------------------------------------
+#  Helper: write contents into an open HWP COM object
+# ---------------------------------------------------------
+function global:Write-HwpContents {
+    param(
+        [object]$Hwp,
+        [string]$Contents,
+        [string]$DefaultFont   = $null,
+        [int]   $DefaultSizePt = 0
+    )
+
+    if ([string]::IsNullOrEmpty($DefaultFont)) { $DefaultFont   = $script:HwpDefaultFont }
+    if ($DefaultSizePt -eq 0)                  { $DefaultSizePt = 16 }
+
+    # Normalise line endings then split
+    $lines = $Contents -replace "`r`n", "`n" -replace "`r", "`n" -split "`n"
+
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $meta = Parse-HwpLineMeta -Line $lines[$i] `
+                                  -DefaultFont $DefaultFont `
+                                  -DefaultSizePt $DefaultSizePt
+
+        # Apply character shape (font + size)
+        $Hwp.HAction.GetDefault("CharShape", $Hwp.HParameterSet.HCharShape.HSet)
+        $Hwp.HParameterSet.HCharShape.FaceNameHangul = $meta.Font
+        $Hwp.HParameterSet.HCharShape.FaceNameLatin  = $meta.Font
+        $Hwp.HParameterSet.HCharShape.FaceNameOther  = $meta.Font
+        $Hwp.HParameterSet.HCharShape.Height         = $meta.SizeHwp
+        $Hwp.HAction.Execute("CharShape", $Hwp.HParameterSet.HCharShape.HSet)
+
+        # Insert text
+        $Hwp.HAction.GetDefault("InsertText", $Hwp.HParameterSet.HInsertText.HSet)
+        $Hwp.HParameterSet.HInsertText.Text = $meta.Text
+        $Hwp.HAction.Execute("InsertText", $Hwp.HParameterSet.HInsertText.HSet)
+
+        # Paragraph break between lines (not after the last line)
+        if ($i -lt $lines.Count - 1) {
+            $Hwp.HAction.Run("BreakPara")
+        }
+    }
+}
 
 function global:Invoke-Action-hwp {
     param([object]$Params)
 
-    $action = if ($Params.action) { $Params.action } else { "open" }
-    $path   = if ($Params.path)   { $Params.path }   else { "" }
+    $action   = if ($Params.action)   { $Params.action }   else { "open" }
+    $path     = if ($Params.path)     { $Params.path }     else { "" }
+    $contents = if ($Params.contents) { $Params.contents } else { "" }
 
     Write-AgentLog "HWP control: $action => $path" -Type Action
 
@@ -39,6 +124,13 @@ function global:Invoke-Action-hwp {
 
             "new" {
                 $hwp.XHwpDocuments.Add($true)
+
+                if ($contents -ne "") {
+                    Write-HwpContents -Hwp $hwp -Contents $contents
+                    Write-AgentLog "New HWP document created with contents." -Type Success
+                    return "New HWP document created with contents."
+                }
+
                 Write-AgentLog "New HWP document created." -Type Success
                 return "New HWP document created."
             }

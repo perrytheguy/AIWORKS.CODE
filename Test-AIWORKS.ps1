@@ -552,6 +552,127 @@ Assert       "meta chrome - 'open' in choices"  ($meta3[0].choices -contains "op
 try { Show-RunHelp; Assert "Show-RunHelp - no crash" $true } catch { Assert "Show-RunHelp - no crash" $false -FailDetail $_.Exception.Message }
 
 # ─────────────────────────────────────────────────────────────
+# TEST-17: Parse-HwpLineMeta 단위 테스트
+# ─────────────────────────────────────────────────────────────
+Write-Section "TEST-17: HWP new contents - Parse-HwpLineMeta"
+
+$expectedDefaultFont = $script:HwpDefaultFont  # 휴먼명조체
+
+# 1. 메타 태그 없음 → 기본값 적용
+$r = Parse-HwpLineMeta "안녕하세요"
+Assert-Equal "기본 폰트"          $expectedDefaultFont  $r.Font
+Assert-Equal "기본 사이즈(pt)"    16            $r.SizePt
+Assert-Equal "기본 SizeHwp"       1600          $r.SizeHwp
+Assert-Equal "기본 텍스트"        "안녕하세요"  $r.Text
+
+# 2. 메타 태그 있음
+$r = Parse-HwpLineMeta "[font=굴림,size=12]작은 텍스트"
+Assert-Equal "메타 폰트"          "굴림"        $r.Font
+Assert-Equal "메타 사이즈(pt)"    12            $r.SizePt
+Assert-Equal "메타 SizeHwp"       1200          $r.SizeHwp
+Assert-Equal "메타 텍스트"        "작은 텍스트" $r.Text
+
+# 3. 공백 포함 폰트명
+$r = Parse-HwpLineMeta "[font=맑은 고딕,size=20]큰 제목"
+Assert-Equal "공백 폰트명"        "맑은 고딕"   $r.Font
+Assert-Equal "큰 사이즈(pt)"      20            $r.SizePt
+Assert-Equal "공백 폰트명 텍스트" "큰 제목"     $r.Text
+
+# 4. = 주변 공백 허용
+$r = Parse-HwpLineMeta "[font = 바탕체,size = 11]본문 내용"
+Assert-Equal "공백허용 폰트"      "바탕체"      $r.Font
+Assert-Equal "공백허용 사이즈"    11            $r.SizePt
+Assert-Equal "공백허용 텍스트"    "본문 내용"   $r.Text
+
+# 5. 태그 이후 텍스트가 비어 있어도 OK
+$r = Parse-HwpLineMeta "[font=돋움,size=14]"
+Assert-Equal "빈 텍스트"          ""            $r.Text
+Assert-Equal "빈 텍스트 폰트"     "돋움"        $r.Font
+
+# 6. 잘못된 태그 형식 → 기본값으로 fallback
+$r = Parse-HwpLineMeta "[굴림,12]잘못된 형식"
+Assert-Equal "잘못된태그 폰트"    $expectedDefaultFont  $r.Font
+Assert-Equal "잘못된태그 텍스트"  "[굴림,12]잘못된 형식" $r.Text
+
+# 7. 줄 끝에 태그 없이 일반 텍스트
+$r = Parse-HwpLineMeta "  앞에 공백"
+Assert-Equal "공백시작 텍스트"    "  앞에 공백" $r.Text
+
+# ─────────────────────────────────────────────────────────────
+# TEST-18: Write-HwpContents — COM mock 없이 파싱 로직 검증
+# ─────────────────────────────────────────────────────────────
+Write-Section "TEST-18: HWP new contents - 다중 행 파싱 검증"
+
+# COM stub: HWP 없이 각 줄이 올바르게 파싱되는지만 확인
+$capturedLines = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+function Mock-WriteHwpContents {
+    param([string]$Contents, [string]$DefaultFont = $null, [int]$DefaultSizePt = 16)
+    if ([string]::IsNullOrEmpty($DefaultFont)) { $DefaultFont = $script:HwpDefaultFont }
+    $lines = $Contents -replace "`r`n", "`n" -replace "`r", "`n" -split "`n"
+    foreach ($line in $lines) {
+        $capturedLines.Add((Parse-HwpLineMeta -Line $line -DefaultFont $DefaultFont -DefaultSizePt $DefaultSizePt))
+    }
+}
+
+$multiLine = "[font=휴먼명조체,size=18]제목`r`n[font=바탕체,size=12]본문 첫째 줄`r`n세번째 줄(기본값)"
+Mock-WriteHwpContents -Contents $multiLine
+
+Assert-Equal "3줄 파싱 수"            3             $capturedLines.Count
+Assert-Equal "1번째 줄 폰트"          $expectedDefaultFont  $capturedLines[0].Font
+Assert-Equal "1번째 줄 사이즈(pt)"    18            $capturedLines[0].SizePt
+Assert-Equal "1번째 줄 텍스트"        "제목"        $capturedLines[0].Text
+Assert-Equal "2번째 줄 폰트"          "바탕체"      $capturedLines[1].Font
+Assert-Equal "2번째 줄 사이즈(pt)"    12            $capturedLines[1].SizePt
+Assert-Equal "2번째 줄 텍스트"        "본문 첫째 줄" $capturedLines[1].Text
+Assert-Equal "3번째 줄 폰트(기본값)"  $expectedDefaultFont  $capturedLines[2].Font
+Assert-Equal "3번째 줄 사이즈(기본)"  16            $capturedLines[2].SizePt
+Assert-Equal "3번째 줄 텍스트"        "세번째 줄(기본값)" $capturedLines[2].Text
+
+# LF-only 줄 나눔도 동일하게 처리되는지
+$capturedLines.Clear()
+Mock-WriteHwpContents -Contents "첫줄`n둘째줄`n셋째줄"
+Assert-Equal "LF 줄 수"              3 $capturedLines.Count
+Assert-Equal "LF 첫줄 텍스트"        "첫줄"  $capturedLines[0].Text
+Assert-Equal "LF 셋째줄 텍스트"      "셋째줄" $capturedLines[2].Text
+
+# 빈 contents → 파싱 결과 1줄(빈 문자열)
+$capturedLines.Clear()
+Mock-WriteHwpContents -Contents ""
+Assert-Equal "빈 contents 줄 수"     1 $capturedLines.Count
+Assert-Equal "빈 contents 텍스트"    "" $capturedLines[0].Text
+
+# ─────────────────────────────────────────────────────────────
+# TEST-19: Invoke-Action-hwp new + contents (HWP 미설치 graceful)
+# ─────────────────────────────────────────────────────────────
+Write-Section "TEST-19: Invoke-Action-hwp new+contents (COM 없음 graceful)"
+
+# TEST-16 mock이 global:Invoke-Action-hwp를 덮어썼으므로 실제 구현 복원
+Import-ActionModules
+
+$params19 = [PSCustomObject]@{
+    action   = "new"
+    path     = ""
+    contents = "[font=굴림,size=14]테스트`r`n두번째 줄"
+}
+$result19 = Invoke-Action-hwp -Params $params19
+$result19Str = @($result19)[0]  # 첫 번째 요소를 문자열로 강제 취득
+# HWP 미설치 환경: Error 문자열 반환 (예외 throw X)
+Assert "HWP 미설치 시 예외 없음"     ($result19Str -is [string])
+Assert "HWP 미설치 Error 메시지"     ($result19Str -like "Error:*" -or $result19Str -like "*created*")
+
+# ─────────────────────────────────────────────────────────────
+# TEST-20: Get-RunParamMeta hwp — contents 파라미터 등록 확인
+# ─────────────────────────────────────────────────────────────
+Write-Section "TEST-20: hwp RunParamMeta contents 파라미터"
+
+$metaHwp = @(Get-RunParamMeta -Action "hwp")
+Assert       "hwp meta 3개 이상"          ($metaHwp.Count -ge 3)
+$contentsParam = $metaHwp | Where-Object { $_.k -eq "contents" }
+Assert       "contents 파라미터 존재"     ($null -ne $contentsParam)
+Assert       "contents 파라미터 optional" ($contentsParam.req -eq $false)
+
+# ─────────────────────────────────────────────────────────────
 # CLEANUP
 # ─────────────────────────────────────────────────────────────
 $script:ConfigPath       = $OriginalConfigPath

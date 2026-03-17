@@ -795,8 +795,9 @@ function Get-RunParamMeta {
             @{ k="timeout";  label="Timeout in seconds (default 30, Enter to skip)";req=$false; choices=@() }
         )}
         "hwp"    { return @(
-            @{ k="action"; label="Sub-action";                                      req=$true;  choices=@("open","read","new","save","pdf","close") }
-            @{ k="path";   label="File path (Enter to skip for new/close)";         req=$false; choices=@() }
+            @{ k="action";   label="Sub-action";                                      req=$true;  choices=@("open","read","new","save","pdf","close") }
+            @{ k="path";     label="File path (Enter to skip for new/close)";         req=$false; choices=@() }
+            @{ k="contents"; label="Text to write (new only, Enter to skip)";         req=$false; choices=@() }
         )}
         "pdf"    { return @(
             @{ k="path";     label="PDF file path";                                 req=$true;  choices=@() }
