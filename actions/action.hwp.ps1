@@ -15,7 +15,8 @@ function global:Invoke-Action-hwp {
 
     Write-AgentLog "HWP control: $action => $path" -Type Action
 
-    $hwp = $null
+    $hwp      = $null
+    $keepOpen = $action.ToLower() -in @("open", "new")
     try {
         $hwp = New-Object -ComObject "HWPFrame.HwpObject"
 
@@ -87,11 +88,11 @@ function global:Invoke-Action-hwp {
         return "Error: $($_.Exception.Message)"
     }
     finally {
-        # Only quit if we didn't already quit via the "close" action
-        if ($hwp -and $action.ToLower() -ne "close") {
+        # Quit only for non-interactive actions (read, save, pdf, close)
+        if ($hwp -and -not $keepOpen -and $action.ToLower() -ne "close") {
             try { $hwp.Quit() } catch {}
         }
-        if ($hwp) {
+        if (-not $keepOpen -and $hwp) {
             try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($hwp) | Out-Null } catch {}
         }
     }

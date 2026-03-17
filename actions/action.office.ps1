@@ -36,7 +36,8 @@ function global:Invoke-Action-office {
         }
     }
 
-    $comApp = $null
+    $comApp  = $null
+    $keepOpen = $action.ToLower() -in @("open", "new")
     try {
         $comApp = New-Object -ComObject $comName
         $comApp.Visible = $true
@@ -188,8 +189,10 @@ function global:Invoke-Action-office {
         return "Error: $($_.Exception.Message)"
     }
     finally {
-        try { if ($comApp) { $comApp.Quit() } } catch {}
-        if ($comApp) {
+        if (-not $keepOpen) {
+            try { if ($comApp) { $comApp.Quit() } } catch {}
+        }
+        if (-not $keepOpen -and $comApp) {
             try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($comApp) | Out-Null } catch {}
         }
     }
