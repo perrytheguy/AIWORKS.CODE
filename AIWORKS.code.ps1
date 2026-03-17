@@ -751,7 +751,7 @@ function Show-RunHelp {
         @("chrome", "Control Chrome browser",            "action=open|navigate|screenshot|script url=URL"),
         @("office", "Control Office (Excel/Word/PPT)",   "app=excel|word|ppt action=open|read|new|save|close|pdf [path=FILE]"),
         @("ie",     "Control Internet Explorer",         "action=open|read|input|click|wait|close [url=URL]"),
-        @("hwp",    "Control HWP word processor",        "action=open|read|new|save|pdf|close [path=FILE]"),
+        @("hwp",    "Control HWP word processor",        "action=open|read|new|save|pdf|close [path=FILE] [contents=TEXT]"),
         @("pdf",    "Read/inspect a PDF file",           "path=FILE [action=read|info] [maxchars=3000]")
     ) | ForEach-Object {
         Write-Host ("  {0,-8}  {1}" -f $_[0], $_[2]) -ForegroundColor Yellow

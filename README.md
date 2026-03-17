@@ -1,6 +1,6 @@
 # AIWORKS.CODE
 
-**버전:** 1.2 | **플랫폼:** Windows PowerShell 5.1
+**버전:** 1.3 | **플랫폼:** Windows PowerShell 5.1
 
 Windows 기업 내부망 환경에서 자연어 명령으로 파일시스템, 브라우저, MS Office / HWP 등을 제어하는 로컬 AI 에이전트 CLI 도구입니다.
 
@@ -143,11 +143,28 @@ AIWORKS> 포털 열어줘
 |------|------|--------------|
 | `answer` | 텍스트 응답 | `message` |
 | `office` | Excel/Word/PPT 제어 | `app`, `action`, `path` |
-| `hwp` | 한글 HWP 제어 | `action`, `path` |
+| `hwp` | 한글 HWP 제어 | `action`, `path`, `contents`(new 전용) |
 | `ie` | IE 브라우저 제어 | `action`, `url`, `selector` |
 | `chrome` | Chrome 브라우저 | `action`, `url` |
 | `pdf` | PDF 텍스트 추출 | `path` |
 | `shell` | PowerShell 실행 | `command`, `workingDir` |
+
+### hwp contents 파라미터 (메타 태그)
+
+`action=new` 와 함께 `contents`를 전달하면 신규 문서에 텍스트를 바로 삽입합니다.
+각 줄의 맨 앞에 `[font=FaceName,size=N]` 태그를 붙이면 줄별로 폰트/크기를 지정할 수 있으며, 태그가 없으면 기본값(휴먼명조체 16pt)이 적용됩니다.
+
+```
+/run hwp action=new contents="[font=휴먼명조체,size=18]보고서 제목
+[font=바탕체,size=12]본문 첫째 줄입니다.
+태그 없는 줄은 기본 폰트/사이즈로 입력됩니다."
+```
+
+```
+AIWORKS> 새 HWP 문서에 '안녕하세요, 홍길동입니다.' 라고 굴림체 14pt로 써줘
+```
+
+---
 
 ### 신규 액션 추가
 
