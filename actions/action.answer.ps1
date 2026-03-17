@@ -1,9 +1,9 @@
-# ============================================================
+﻿# ============================================================
 #  AIWORKS.CODE - Action Module: answer
 #  Displays a text reply from the AI to the user.
 # ============================================================
 
-function Invoke-Action-answer {
+function global:Invoke-Action-answer {
     param([object]$Params)
 
     # $Params here is the full parsed AI response object (action, params, message, ...)

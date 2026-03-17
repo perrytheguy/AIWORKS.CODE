@@ -316,24 +316,24 @@ function Parse-AIResponse {
 # ─────────────────────────────────────────────────────────────
 
 function Test-DangerousAction {
-    param([string]$Input, [object]$Parsed)
+    param([string]$UserInput, [object]$Parsed)
     if ($Parsed.requires_confirmation -eq $true) { return $true }
     $raw      = Coalesce $script:Config["Safety.ConfirmKeywords"] (Coalesce $script:Config["ConfirmKeywords"] "")
     $keywords = $raw -split ","
     foreach ($kw in $keywords) {
         $kw = $kw.Trim()
-        if ($kw -ne "" -and $Input -match [regex]::Escape($kw)) { return $true }
+        if ($kw -ne "" -and $UserInput -match [regex]::Escape($kw)) { return $true }
     }
     return $false
 }
 
 function Get-DangerWarningMessage {
-    param([string]$Input)
+    param([string]$UserInput)
     $raw      = Coalesce $script:Config["Safety.ConfirmKeywords"] (Coalesce $script:Config["ConfirmKeywords"] "")
     $keywords = $raw -split ","
     foreach ($kw in $keywords) {
         $kw = $kw.Trim()
-        if ($kw -ne "" -and $Input -match [regex]::Escape($kw)) {
+        if ($kw -ne "" -and $UserInput -match [regex]::Escape($kw)) {
             $warnMsg = Coalesce $script:Config["Warnings.$kw"] (Coalesce $script:Config[$kw] "")
             if ($warnMsg -ne "") { return $warnMsg }
         }
@@ -352,8 +352,8 @@ function Invoke-AgentAction {
     $params = $Parsed.params
     $msg    = $Parsed.message
 
-    if (Test-DangerousAction -Input $UserInput -Parsed $Parsed) {
-        $warnMsg   = Get-DangerWarningMessage -Input $UserInput
+    if (Test-DangerousAction -UserInput $UserInput -Parsed $Parsed) {
+        $warnMsg   = Get-DangerWarningMessage -UserInput $UserInput
         $confirmed = Request-Confirmation -Message $warnMsg
         if (-not $confirmed) {
             Write-AgentLog "Action cancelled by user." -Type Warning
@@ -396,30 +396,28 @@ function Invoke-AgentAction {
 # ─────────────────────────────────────────────────────────────
 
 function Load-VectorDB {
+    # Returns [System.Collections.Generic.List[object]].
+    # Wrapped with unary comma (,$list) to prevent PS pipeline enumeration.
+    $list = [System.Collections.Generic.List[object]]::new()
     if (Test-Path $script:DbPath) {
         try {
             $raw = [System.IO.File]::ReadAllText($script:DbPath, [System.Text.Encoding]::UTF8)
-            if ($raw.Trim() -eq "" -or $raw.Trim() -eq "[]") {
-                return [System.Collections.Generic.List[object]]::new()
+            if ($raw.Trim() -ne "" -and $raw.Trim() -ne "[]") {
+                foreach ($item in @($raw | ConvertFrom-Json)) { $list.Add($item) }
             }
-            $parsed = $raw | ConvertFrom-Json
-            $list   = [System.Collections.Generic.List[object]]::new()
-            foreach ($item in $parsed) { $list.Add($item) }
-            return $list
         }
         catch {
             Write-AgentLog "DB load error: $($_.Exception.Message)" -Type Warning
-            return [System.Collections.Generic.List[object]]::new()
         }
     }
-    return [System.Collections.Generic.List[object]]::new()
+    return ,$list
 }
 
 function Save-VectorDB {
     param([System.Collections.Generic.List[object]]$Entries)
     try {
-        $json = $Entries | ConvertTo-Json -Depth 10
-        if ($Entries.Count -eq 0) { $json = "[]" }
+        # Force array output even for 0 or 1 entries (PS pipeline would otherwise unwrap single items)
+        $json = if ($null -eq $Entries -or $Entries.Count -eq 0) { "[]" } else { ConvertTo-Json -InputObject ([object[]]$Entries) -Depth 10 }
         [System.IO.File]::WriteAllText($script:DbPath, $json, [System.Text.Encoding]::UTF8)
     }
     catch {
@@ -430,7 +428,7 @@ function Save-VectorDB {
 function Search-VectorDB {
     param([string]$Query)
     $db = Load-VectorDB
-    if ($db.Count -eq 0) { return $null }
+    if ($null -eq $db -or $db.Count -eq 0) { return $null }
     $queryLower = $Query.ToLower()
     foreach ($entry in $db) {
         foreach ($kw in $entry.keywords) {
@@ -453,6 +451,7 @@ function Add-VectorDBEntry {
         created  = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
     }
     $db = Load-VectorDB
+    if ($null -eq $db) { $db = [System.Collections.Generic.List[object]]::new() }
     $db.Add($entry)
     Save-VectorDB -Entries $db
     Write-AgentLog "Entry saved to DB." -Type Success
@@ -466,6 +465,7 @@ function Invoke-DbCommand {
     switch ($sub) {
         "list" {
             $db = Load-VectorDB
+            if ($null -eq $db) { $db = [System.Collections.Generic.List[object]]::new() }
             Write-Host ""
             if ($db.Count -eq 0) {
                 Write-AgentLog "Vector DB is empty." -Type System
@@ -488,6 +488,7 @@ function Invoke-DbCommand {
             }
             $idx = [int]$tokens[2]
             $db  = Load-VectorDB
+            if ($null -eq $db) { $db = [System.Collections.Generic.List[object]]::new() }
             if ($idx -ge 0 -and $idx -lt $db.Count) {
                 $db.RemoveAt($idx)
                 Save-VectorDB -Entries $db
@@ -695,7 +696,7 @@ function Show-ConfigHelp {
 function Invoke-ConfigCommand {
     param([string]$Cmd)
     $tokens  = [System.Collections.Generic.List[string]]::new()
-    $pattern = '"([^"]*)"|(\\S+)'
+    $pattern = '"([^"]*)"|(\S+)'
     [regex]::Matches($Cmd.Trim(), $pattern) | ForEach-Object {
         if ($_.Groups[1].Success) { $tokens.Add($_.Groups[1].Value) }
         else                      { $tokens.Add($_.Groups[2].Value) }
@@ -738,7 +739,179 @@ function Invoke-ConfigCommand {
 }
 
 # ─────────────────────────────────────────────────────────────
-# [9] Slash commands
+# [9] /run command - Direct action executor
+# ─────────────────────────────────────────────────────────────
+
+function Show-RunHelp {
+    Write-Host ""
+    Write-Host "  -- /run <action> [key=value ...]  ---------------" -ForegroundColor DarkGray
+    @(
+        @("answer", "Display a text message",            "message=TEXT"),
+        @("shell",  "Execute a PowerShell command",      "command=CMD [workdir=PATH] [timeout=60]"),
+        @("chrome", "Control Chrome browser",            "action=open|navigate|screenshot|script url=URL"),
+        @("office", "Control Office (Excel/Word/PPT)",   "app=excel|word|ppt action=open|read|new|save|close|pdf [path=FILE]"),
+        @("ie",     "Control Internet Explorer",         "action=open|read|input|click|wait|close [url=URL]"),
+        @("hwp",    "Control HWP word processor",        "action=open|read|new|save|pdf|close [path=FILE]"),
+        @("pdf",    "Read/inspect a PDF file",           "path=FILE [action=read|info] [maxchars=3000]")
+    ) | ForEach-Object {
+        Write-Host ("  {0,-8}  {1}" -f $_[0], $_[2]) -ForegroundColor Yellow
+        Write-Host ("           {0}" -f $_[1])        -ForegroundColor DarkGray
+    }
+    Write-Host ""
+    Write-Host "  Omit params for interactive prompts." -ForegroundColor DarkGray
+    Write-Host "  -----------------------------------------------" -ForegroundColor DarkGray
+    Write-Host ""
+}
+
+function Get-RunParamMeta {
+    param([string]$Action)
+    switch ($Action) {
+        "answer" { return @(
+            @{ k="message"; label="Message text";                                   req=$true;  choices=@() }
+        )}
+        "shell"  { return @(
+            @{ k="command"; label="PowerShell command";                             req=$true;  choices=@() }
+            @{ k="workdir"; label="Working directory (Enter to skip)";              req=$false; choices=@() }
+            @{ k="timeout"; label="Timeout in seconds (default 60, Enter to skip)"; req=$false; choices=@() }
+        )}
+        "chrome" { return @(
+            @{ k="action"; label="Sub-action";                                      req=$true;  choices=@("open","navigate","screenshot","script") }
+            @{ k="url";    label="Target URL";                                      req=$true;  choices=@() }
+            @{ k="script"; label="JavaScript code (script action, Enter to skip)";  req=$false; choices=@() }
+            @{ k="output"; label="Output path (screenshot, Enter to skip)";         req=$false; choices=@() }
+            @{ k="profile";label="Chrome profile directory (Enter to skip)";        req=$false; choices=@() }
+        )}
+        "office" { return @(
+            @{ k="app";    label="Application";                                     req=$true;  choices=@("excel","word","ppt") }
+            @{ k="action"; label="Sub-action";                                      req=$true;  choices=@("open","read","new","save","close","pdf") }
+            @{ k="path";   label="File path (Enter to skip for new/close)";         req=$false; choices=@() }
+            @{ k="sheet";  label="Sheet name or index (Excel read, Enter to skip)"; req=$false; choices=@() }
+        )}
+        "ie"     { return @(
+            @{ k="action";   label="Sub-action";                                    req=$true;  choices=@("open","read","input","click","wait","close") }
+            @{ k="url";      label="Target URL (Enter to skip for close/wait)";     req=$false; choices=@() }
+            @{ k="selector"; label="Element ID (input/click, Enter to skip)";       req=$false; choices=@() }
+            @{ k="value";    label="Input value (input action, Enter to skip)";     req=$false; choices=@() }
+            @{ k="timeout";  label="Timeout in seconds (default 30, Enter to skip)";req=$false; choices=@() }
+        )}
+        "hwp"    { return @(
+            @{ k="action"; label="Sub-action";                                      req=$true;  choices=@("open","read","new","save","pdf","close") }
+            @{ k="path";   label="File path (Enter to skip for new/close)";         req=$false; choices=@() }
+        )}
+        "pdf"    { return @(
+            @{ k="path";     label="PDF file path";                                 req=$true;  choices=@() }
+            @{ k="action";   label="Sub-action (Enter for read)";                   req=$false; choices=@("read","info") }
+            @{ k="maxchars"; label="Max characters (default 3000, Enter to skip)";  req=$false; choices=@() }
+        )}
+        default  { return @() }
+    }
+}
+
+function Invoke-RunPrompt {
+    param([string]$Action, [hashtable]$Params)
+    # @() forces array even when Get-RunParamMeta returns a single hashtable (PS pipeline unrolling)
+    $meta = @(Get-RunParamMeta -Action $Action)
+    Write-Host ""
+    $dash = "-" * [Math]::Max(1, 38 - $Action.Length)
+    Write-Host ("  -- /run {0} {1}" -f $Action, $dash) -ForegroundColor DarkGray
+
+    foreach ($p in $meta) {
+        $k = $p.k
+        # Already provided on command line — just display
+        if ($Params.ContainsKey($k) -and "$($Params[$k])" -ne "") {
+            Write-Host ("  {0,-10} = {1}" -f $k, $Params[$k]) -ForegroundColor Cyan
+            continue
+        }
+        # Choice-based param: show numbered sub-menu
+        if ($p.choices.Count -gt 0) {
+            Write-Host ""
+            Write-Host ("  {0}:" -f $p.label) -ForegroundColor Yellow
+            for ($i = 0; $i -lt $p.choices.Count; $i++) {
+                Write-Host ("    [{0}] {1}" -f ($i + 1), $p.choices[$i]) -ForegroundColor White
+            }
+            $sel = Read-Host ("  Select [1-{0}] or type value" -f $p.choices.Count)
+            if ($sel -match '^\d+$') {
+                $idx = [int]$sel - 1
+                if ($idx -ge 0 -and $idx -lt $p.choices.Count) {
+                    $Params[$k] = $p.choices[$idx]
+                } else {
+                    Write-AgentLog "Invalid choice '$sel' for '$k'. Cancelled." -Type Warning
+                    return $null
+                }
+            } elseif ($sel -ne "") {
+                $Params[$k] = $sel
+            } elseif ($p.req) {
+                Write-AgentLog "Required param '$k' not provided. Cancelled." -Type Warning
+                return $null
+            }
+        } else {
+            # Free-text param
+            $val = Read-Host ("  {0}" -f $p.label)
+            if ($val -ne "") {
+                $Params[$k] = $val
+            } elseif ($p.req) {
+                Write-AgentLog "Required param '$k' not provided. Cancelled." -Type Warning
+                return $null
+            }
+        }
+    }
+    Write-Host ""
+    return $Params
+}
+
+function Invoke-RunCommand {
+    param([string]$Cmd)
+    # Split on first two whitespace tokens to get /run + action, rest is key=value string
+    $words = $Cmd.Trim() -split '\s+', 3
+
+    $validActions = @("answer","shell","chrome","office","ie","hwp","pdf")
+    $actionName   = if ($words.Count -gt 1) { $words[1].ToLower() } else { "" }
+
+    if ($actionName -eq "" -or $actionName -eq "help") { Show-RunHelp; return }
+
+    if ($validActions -notcontains $actionName) {
+        Write-AgentLog "Unknown action: '$actionName'. Available: $($validActions -join ', ')" -Type Warning
+        return
+    }
+
+    # Parse key=value pairs supporting both key=plain and key="quoted value"
+    $params = @{}
+    $rest   = if ($words.Count -gt 2) { $words[2] } else { "" }
+    if ($rest -ne "") {
+        [regex]::Matches($rest, '(\w+)=(?:"([^"]*)"|([\S]+))') | ForEach-Object {
+            $k = $_.Groups[1].Value.ToLower()
+            $v = if ($_.Groups[2].Success) { $_.Groups[2].Value } else { $_.Groups[3].Value }
+            $params[$k] = $v
+        }
+    }
+
+    # Interactive completion for missing params
+    $params = Invoke-RunPrompt -Action $actionName -Params $params
+    if ($null -eq $params) { return }
+
+    # Build PSCustomObject for action modules
+    $paramObj = New-Object PSObject -Property $params
+
+    $fnName = "Invoke-Action-$actionName"
+    $fn     = Get-Command $fnName -ErrorAction SilentlyContinue
+    if ($null -eq $fn) {
+        Write-AgentLog "Action '$actionName' not loaded. Check actions/ directory." -Type Error
+        return
+    }
+
+    Write-AgentLog "Running action: $actionName" -Type Action
+    $result = & $fn -Params $paramObj
+    if ($result) {
+        Write-Host ""
+        Write-Host "  -- Result ----------------------------------" -ForegroundColor DarkGray
+        Write-Host ($result -join "`n") -ForegroundColor White
+        Write-Host "  -------------------------------------------" -ForegroundColor DarkGray
+        Write-Host ""
+    }
+}
+
+# ─────────────────────────────────────────────────────────────
+# [10] Slash commands
 # ─────────────────────────────────────────────────────────────
 
 function Invoke-SlashCommand {
@@ -765,7 +938,8 @@ function Invoke-SlashCommand {
             Write-Host "  Auth     : $tokenStatus"                           -ForegroundColor Cyan
             Write-Host "  DB Path  : $script:DbPath"                         -ForegroundColor Cyan
             $db = Load-VectorDB
-            Write-Host "  DB Items : $($db.Count)"                           -ForegroundColor Cyan
+            $dbCount = if ($null -eq $db) { 0 } else { $db.Count }
+            Write-Host "  DB Items : $dbCount"                                -ForegroundColor Cyan
             Write-Host "  -----------------------------------------------" -ForegroundColor DarkGray
             Write-Host ""
             return $true
@@ -797,6 +971,10 @@ function Invoke-SlashCommand {
             Invoke-DbCommand -Cmd $Cmd
             return $true
         }
+        "^/run" {
+            Invoke-RunCommand -Cmd $Cmd
+            return $true
+        }
         "^/help$" {
             Write-Host ""
             Write-Host "  -- Available Commands --------------------------" -ForegroundColor DarkGray
@@ -807,6 +985,7 @@ function Invoke-SlashCommand {
             Write-Host "  /reset             Clear chat history"             -ForegroundColor Yellow
             Write-Host "  /config [sub]      Edit config file (see /config help)" -ForegroundColor Yellow
             Write-Host "  /db [sub]          Vector DB management (see /db help)" -ForegroundColor Yellow
+            Write-Host "  /run [action] [k=v]  Execute action directly (see /run help)" -ForegroundColor Yellow
             Write-Host "  /help              Show this help"                 -ForegroundColor Yellow
             Write-Host "  -----------------------------------------------" -ForegroundColor DarkGray
             Write-Host ""
@@ -933,4 +1112,6 @@ function Start-AgentREPL {
 # ─────────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────────
-Start-AgentREPL
+if ($env:AIWORKS_TEST_MODE -ne "1") {
+    Start-AgentREPL
+}

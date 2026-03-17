@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 #  AIWORKS.CODE - Action Module: pdf
 #  Extracts text from PDF files using pdftotext or fallback.
 #
@@ -8,7 +8,7 @@
 #    maxchars : max characters to return (optional, default 3000)
 # ============================================================
 
-function Invoke-Action-pdf {
+function global:Invoke-Action-pdf {
     param([object]$Params)
 
     $path     = if ($Params.path)     { $Params.path }             else { "" }

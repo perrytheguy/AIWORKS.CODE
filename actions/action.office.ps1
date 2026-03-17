@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 #  AIWORKS.CODE - Action Module: office
 #  Controls Excel, Word, and PowerPoint via COM (OLE).
 #
@@ -11,7 +11,7 @@
 #    text   : text to insert (Word only, optional)
 # ============================================================
 
-function Invoke-Action-office {
+function global:Invoke-Action-office {
     param([object]$Params)
 
     $app    = if ($Params.app)    { $Params.app }    else { "" }

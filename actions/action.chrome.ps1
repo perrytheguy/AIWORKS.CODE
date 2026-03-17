@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 #  AIWORKS.CODE - Action Module: chrome
 #  Controls Google Chrome browser.
 #  Strategy: Start-Process for simple URL opening.
@@ -13,7 +13,7 @@
 #    profile : Chrome profile directory (optional)
 # ============================================================
 
-function Invoke-Action-chrome {
+function global:Invoke-Action-chrome {
     param([object]$Params)
 
     $action  = if ($Params.action)  { $Params.action }  else { "open" }

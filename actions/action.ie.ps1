@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 #  AIWORKS.CODE - Action Module: ie
 #  Controls Internet Explorer via COM automation.
 #
@@ -10,7 +10,7 @@
 #    timeout  : wait timeout in seconds (optional, default 30)
 # ============================================================
 
-function Invoke-Action-ie {
+function global:Invoke-Action-ie {
     param([object]$Params)
 
     $action   = if ($Params.action)   { $Params.action }   else { "open" }

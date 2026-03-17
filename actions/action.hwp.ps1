@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 #  AIWORKS.CODE - Action Module: hwp
 #  Controls Hangul HWP word processor via COM.
 #
@@ -7,7 +7,7 @@
 #    path   : file path (string)
 # ============================================================
 
-function Invoke-Action-hwp {
+function global:Invoke-Action-hwp {
     param([object]$Params)
 
     $action = if ($Params.action) { $Params.action } else { "open" }

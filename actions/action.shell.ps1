@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 #  AIWORKS.CODE - Action Module: shell
 #  Executes PowerShell commands in a controlled manner.
 #
@@ -9,7 +9,7 @@
 #    capture    : capture output as string (bool, default true)
 # ============================================================
 
-function Invoke-Action-shell {
+function global:Invoke-Action-shell {
     param([object]$Params)
 
     $command = if ($Params.command)  { $Params.command }   else { "" }
